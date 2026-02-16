@@ -32,6 +32,9 @@ pub enum ExecuteMsg {
         // json encoded
         payload: Option<String>,
     },
+    Callback {
+        recipient: String,
+    },
 }
 
 #[cw_ownable_query]

@@ -1,15 +1,23 @@
+use crate::state::APPROVED_LIBRARIES;
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_json_binary, Addr, Attribute, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, MessageInfo, Order, Reply, Response, StdError, StdResult, WasmMsg};
+use cosmwasm_std::WasmMsg::Execute;
+use cosmwasm_std::{
+    to_json_binary, Addr, Attribute, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Empty, Env,
+    MessageInfo, Order, Reply, Response, StdError, StdResult, WasmMsg,
+};
 use cw2::set_contract_version;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use valence_account_utils::error::ContractError::Unauthorized;
+use valence_account_utils::error::UnauthorizedReason;
+use valence_account_utils::error::UnauthorizedReason::NotApprovedLibrary;
 use valence_account_utils::{
     error::ContractError,
     msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ValenceCallback},
 };
+use valence_duality_utils::msg::ExecuteMsg as DualityExecuteMsg;
 use valence_lending_utils::mars::{Account, ActionCoin};
-use crate::state::APPROVED_LIBRARIES;
 
 // version info for migration info
 const CONTRACT_NAME: &str = env!("CARGO_PKG_NAME");
@@ -49,6 +57,7 @@ pub fn execute(
         ExecuteMsg::ExecuteSubmsgs { msgs, payload } => {
             execute::execute_submsgs(deps, info, msgs, payload)
         }
+        ExecuteMsg::Callback { recipient } => send_all_callback(deps, info, env, recipient),
     }
 }
 
@@ -167,7 +176,7 @@ pub fn reply(_deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, Contract
 pub struct MigrateMsg {
     pub recipient: String,
     pub denom: String,
-    pub credit_manager: String
+    pub credit_manager: String,
 }
 
 // Helper function to get credit account for an owner
@@ -191,18 +200,33 @@ fn get_credit_account(
         .ok_or_else(|| StdError::not_found("credit_account"))
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(deps: DepsMut, env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
+fn send_all_callback(
+    deps: DepsMut,
+    info: MessageInfo,
+    env: Env,
+    recipient: String,
+) -> Result<Response, ContractError> {
+    if info.sender != env.contract.address {
+        return Err(Unauthorized(NotApprovedLibrary));
+    }
+
     let mut res = Response::new();
 
     let funds = deps.querier.query_all_balances(&env.contract.address)?;
 
     let send_msg = BankMsg::Send {
-        to_address: msg.recipient.clone(),
+        to_address: recipient,
         amount: funds,
     };
 
     res = res.add_messages(vec![send_msg]);
+
+    Ok(res)
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(deps: DepsMut, env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
+    let mut res = Response::new();
 
     // Get credit account
     let credit_acc = get_credit_account(
@@ -228,7 +252,8 @@ pub fn migrate(deps: DepsMut, env: Env, msg: MigrateMsg) -> Result<Response, Con
                             valence_lending_utils::mars::Action::WithdrawToWallet {
                                 coin: ActionCoin {
                                     denom: msg.denom.clone(),
-                                    amount: valence_lending_utils::mars::ActionAmount::AccountBalance,
+                                    amount:
+                                        valence_lending_utils::mars::ActionAmount::AccountBalance,
                                 },
                                 recipient: msg.recipient.clone(),
                             },
@@ -242,10 +267,32 @@ pub fn migrate(deps: DepsMut, env: Env, msg: MigrateMsg) -> Result<Response, Con
         }
         Err(err) => {
             if err != StdError::not_found("credit_account") {
-                return Err(ContractError::from(err))
+                return Err(ContractError::from(err));
             }
         }
     }
+
+    let funds = deps.querier.query_all_balances(&env.contract.address)?;
+
+    for coin in funds.iter() {
+        if coin.denom.starts_with("factory") {
+            res = res.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: coin.denom.clone().split("/").collect::<Vec<&str>>()[1].to_string(),
+                msg: to_json_binary(&DualityExecuteMsg::Withdraw {
+                    amount: coin.amount,
+                })?,
+                funds: vec![Coin::new(coin.amount, coin.denom.clone())],
+            }));
+        }
+    }
+
+    res = res.add_message(CosmosMsg::Wasm(Execute {
+        contract_addr: env.contract.address.to_string(),
+        msg: to_json_binary(&ExecuteMsg::Callback {
+            recipient: msg.recipient,
+        })?,
+        funds: vec![],
+    }));
 
     Ok(res)
 }
