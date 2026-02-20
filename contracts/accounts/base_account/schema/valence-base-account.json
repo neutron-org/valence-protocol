@@ -929,7 +929,72 @@
       }
     ]
   },
-  "migrate": null,
+  "migrate": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "MigrateMsg",
+    "type": "object",
+    "required": [
+      "withdraw_type"
+    ],
+    "properties": {
+      "withdraw_type": {
+        "$ref": "#/definitions/WithdrawType"
+      }
+    },
+    "additionalProperties": false,
+    "definitions": {
+      "WithdrawType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Supervault"
+            ],
+            "properties": {
+              "Supervault": {
+                "type": "object",
+                "required": [
+                  "recipient"
+                ],
+                "properties": {
+                  "recipient": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "Amber"
+            ],
+            "properties": {
+              "Amber": {
+                "type": "object",
+                "required": [
+                  "denom",
+                  "recipient"
+                ],
+                "properties": {
+                  "denom": {
+                    "type": "string"
+                  },
+                  "recipient": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
   "sudo": null,
   "responses": {
     "list_approved_libraries": {

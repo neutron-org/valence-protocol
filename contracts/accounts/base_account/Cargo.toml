@@ -30,6 +30,8 @@ schemars              = { workspace = true }
 serde                 = { workspace = true }
 thiserror             = { workspace = true }
 valence-account-utils = { workspace = true }
+valence-lending-utils = { workspace = true }
+valence-duality-utils = { workspace = true }
 
 [dev-dependencies]
 cw-multi-test         = { workspace = true }
